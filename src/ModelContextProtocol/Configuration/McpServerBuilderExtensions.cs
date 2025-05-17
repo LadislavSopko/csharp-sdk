@@ -761,7 +761,11 @@ public static partial class McpServerBuilderExtensions
         return builder;
     }
 
-    private static void AddSingleSessionServerDependencies(IServiceCollection services)
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="services"></param>
+    public static void AddSingleSessionServerDependencies(this IServiceCollection services)
     {
         services.AddHostedService<SingleSessionMcpServerHostedService>();
         services.TryAddSingleton(services =>
