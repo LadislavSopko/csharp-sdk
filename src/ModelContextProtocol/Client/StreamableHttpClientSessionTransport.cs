@@ -15,7 +15,7 @@ namespace ModelContextProtocol.Client;
 /// <summary>
 /// The Streamable HTTP client transport implementation
 /// </summary>
-internal sealed partial class StreamableHttpClientSessionTransport : TransportBase
+public sealed partial class StreamableHttpClientSessionTransport : TransportBase
 {
     private static readonly MediaTypeWithQualityHeaderValue s_applicationJsonMediaType = new("application/json");
     private static readonly MediaTypeWithQualityHeaderValue s_textEventStreamMediaType = new("text/event-stream");
@@ -28,6 +28,13 @@ internal sealed partial class StreamableHttpClientSessionTransport : TransportBa
     private string? _mcpSessionId;
     private Task? _getReceiveTask;
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="transportOptions"></param>
+    /// <param name="httpClient"></param>
+    /// <param name="loggerFactory"></param>
+    /// <param name="endpointName"></param>
     public StreamableHttpClientSessionTransport(SseClientTransportOptions transportOptions, HttpClient httpClient, ILoggerFactory? loggerFactory, string endpointName)
         : base(endpointName, loggerFactory)
     {
@@ -113,6 +120,10 @@ internal sealed partial class StreamableHttpClientSessionTransport : TransportBa
         }
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <returns></returns>
     public override async ValueTask DisposeAsync()
     {
         try
