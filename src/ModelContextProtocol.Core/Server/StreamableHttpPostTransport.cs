@@ -86,6 +86,11 @@ internal sealed class StreamableHttpPostTransport(StreamableHttpServerTransport 
         await _sseWriter.DisposeAsync().ConfigureAwait(false);
     }
 
+    public void Dispose()
+    {
+        _sseWriter.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
     private async IAsyncEnumerable<SseItem<JsonRpcMessage?>> StopOnFinalResponseFilter(IAsyncEnumerable<SseItem<JsonRpcMessage?>> messages, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         await foreach (var message in messages.WithCancellation(cancellationToken))

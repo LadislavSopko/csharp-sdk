@@ -155,4 +155,25 @@ public sealed class StreamableHttpServerTransport : ITransport
             }
         }
     }
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        try
+        {
+            _incomingChannel.Writer.TryComplete();
+            _disposeCts.Cancel();
+        }
+        finally
+        {
+            try
+            {
+                _sseWriter.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            finally
+            {
+                _disposeCts.Dispose();
+            }
+        }
+    }
 }

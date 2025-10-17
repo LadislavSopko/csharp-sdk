@@ -136,6 +136,19 @@ internal sealed partial class SseClientSessionTransport : TransportBase
         }
     }
 
+    /// <inheritdoc/>
+    public override void Dispose()
+    {
+        try
+        {
+            CloseAsync().GetAwaiter().GetResult();
+        }
+        catch (Exception)
+        {
+            // Ignore exceptions on close
+        }
+    }
+
     private async Task ReceiveMessagesAsync(CancellationToken cancellationToken)
     {
         try

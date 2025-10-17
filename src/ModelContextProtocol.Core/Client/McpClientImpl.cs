@@ -232,8 +232,10 @@ internal sealed partial class McpClientImpl : McpClient
         _disposed = true;
 
         await _sessionHandler.DisposeAsync().ConfigureAwait(false);
-        await _transport.DisposeAsync().ConfigureAwait(false);
+        _transport.Dispose();
     }
+
+    
 
     [LoggerMessage(Level = LogLevel.Information, Message = "{EndpointName} client received server '{ServerInfo}' capabilities: '{Capabilities}'.")]
     private partial void LogServerCapabilitiesReceived(string endpointName, string capabilities, string serverInfo);

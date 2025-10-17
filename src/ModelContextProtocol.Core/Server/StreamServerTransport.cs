@@ -193,4 +193,47 @@ public class StreamServerTransport : TransportBase
 
         GC.SuppressFinalize(this);
     }
+
+    /// <inheritdoc />
+    public override void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            LogTransportShuttingDown(Name);
+
+            // Signal to the stdin reading loop to stop.
+            _shutdownCts.Cancel();
+            _shutdownCts.Dispose();
+
+            // Dispose of stdin/out. Cancellation may not be able to wake up operations
+            // synchronously blocked in a syscall; we need to forcefully close the handle / file descriptor.
+            _inputReader?.Dispose();
+            _outputStream?.Dispose();
+
+            // Make sure the work has quiesced.
+            try
+            {
+                _readLoopCompleted.GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                LogTransportCleanupReadTaskFailed(Name, ex);
+            }
+        }
+        finally
+        {
+            SetDisconnected();
+            LogTransportShutDown(Name);
+        }
+
+        GC.SuppressFinalize(this);
+    }
 }

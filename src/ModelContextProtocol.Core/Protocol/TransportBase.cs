@@ -15,7 +15,7 @@ namespace ModelContextProtocol.Protocol;
 /// </para>
 /// <para>
 /// Custom transport implementations should inherit from this class and implement the abstract
-/// <see cref="SendMessageAsync(JsonRpcMessage, CancellationToken)"/> and <see cref="DisposeAsync()"/> methods
+/// <see cref="SendMessageAsync(JsonRpcMessage, CancellationToken)"/> and <see cref="Dispose()"/> methods
 /// to handle the specific transport mechanism being used.
 /// </para>
 /// </remarks>
@@ -81,6 +81,9 @@ public abstract partial class TransportBase : ITransport
 
     /// <inheritdoc/>
     public abstract ValueTask DisposeAsync();
+
+    /// <inheritdoc/>
+    public abstract void Dispose();
 
     /// <summary>
     /// Writes a message to the message channel.

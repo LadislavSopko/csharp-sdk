@@ -23,7 +23,7 @@ namespace ModelContextProtocol.Protocol;
 /// <see cref="ITransport"/> instance by calling <see cref="IClientTransport.ConnectAsync"/>.
 /// </para>
 /// </remarks>
-public interface ITransport : IAsyncDisposable
+public interface ITransport : IDisposable
 {
     /// <summary>Gets an identifier associated with the current MCP session.</summary>
     /// <remarks>

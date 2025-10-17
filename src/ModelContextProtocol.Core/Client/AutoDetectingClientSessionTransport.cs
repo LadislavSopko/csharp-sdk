@@ -117,7 +117,25 @@ internal sealed partial class AutoDetectingClientSessionTransport : ITransport
         {
             if (ActiveTransport is not null)
             {
-                await ActiveTransport.DisposeAsync().ConfigureAwait(false);
+                //await ActiveTransport.DisposeAsync().ConfigureAwait(false);
+                ActiveTransport.Dispose();
+            }
+        }
+        finally
+        {
+            // In the majority of cases, either the Streamable HTTP transport or SSE transport has completed the channel by now.
+            // However, this may not be the case if HttpClient throws during the initial request due to misconfiguration.
+            _messageChannel.Writer.TryComplete();
+        }
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (ActiveTransport is not null)
+            {
+                ActiveTransport.Dispose();
             }
         }
         finally

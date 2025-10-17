@@ -63,6 +63,15 @@ public sealed class SseResponseStreamTransport(Stream sseResponseStream, string?
     }
 
     /// <inheritdoc/>
+    public void Dispose()
+    {
+        _isConnected = false;
+        _incomingChannel.Writer.TryComplete();
+        _sseWriter.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
+
+    /// <inheritdoc/>
     public async Task SendMessageAsync(JsonRpcMessage message, CancellationToken cancellationToken = default)
     {
         Throw.IfNull(message);

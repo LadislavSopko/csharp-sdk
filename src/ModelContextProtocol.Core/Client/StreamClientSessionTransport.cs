@@ -123,6 +123,10 @@ internal class StreamClientSessionTransport : TransportBase
     public override ValueTask DisposeAsync() =>
         CleanupAsync(cancellationToken: CancellationToken.None);
 
+    /// <inheritdoc/>
+    public override void Dispose() =>
+        CleanupAsync(cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
+
     private async Task ReadMessagesAsync(CancellationToken cancellationToken)
     {
         Exception? error = null;

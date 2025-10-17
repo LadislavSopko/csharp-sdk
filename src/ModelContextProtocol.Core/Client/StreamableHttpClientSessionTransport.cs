@@ -168,6 +168,54 @@ internal sealed partial class StreamableHttpClientSessionTransport : TransportBa
         }
     }
 
+
+    public override void Dispose()
+    {
+        lock (_disposeLock)  // Use regular object for locking
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            _disposed = true;
+        }
+
+        try
+        {
+            _connectionCts.Cancel();
+
+            try
+            {
+                // Send DELETE request to terminate the session. Only send if we have a session ID, per MCP spec.
+                if (!string.IsNullOrEmpty(SessionId))
+                {
+                    SendDeleteRequest().GetAwaiter().GetResult();
+                }
+
+                if (_getReceiveTask != null)
+                {
+                    _getReceiveTask.GetAwaiter().GetResult();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            finally
+            {
+                _connectionCts.Dispose();
+            }
+        }
+        finally
+        {
+            // If we're auto-detecting the transport and failed to connect, leave the message Channel open for the SSE transport.
+            // This class isn't directly exposed to public callers, so we don't have to worry about changing the _state in this case.
+            if (_options.TransportMode is not HttpTransportMode.AutoDetect || _getReceiveTask is not null)
+            {
+                SetDisconnected();
+            }
+        }
+    }
+
     private async Task ReceiveUnsolicitedMessagesAsync()
     {
         // Send a GET request to handle any unsolicited messages not sent over a POST response.
