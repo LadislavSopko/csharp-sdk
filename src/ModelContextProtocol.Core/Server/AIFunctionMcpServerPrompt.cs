@@ -71,7 +71,7 @@ internal sealed class AIFunctionMcpServerPrompt : McpServerPrompt
         {
             Name = options?.Name ?? method.GetCustomAttribute<McpServerPromptAttribute>()?.Name ?? AIFunctionMcpServerTool.DeriveName(method),
             Description = options?.Description,
-            MarshalResult = static (result, _, cancellationToken) => new ValueTask<object?>(result),
+            // MarshalResult = static (result, _, cancellationToken) => new ValueTask<object?>(result), // Commented out for VS compatibility
             SerializerOptions = options?.SerializerOptions ?? McpJsonUtilities.DefaultOptions,
             JsonSchemaCreateOptions = options?.SchemaCreateOptions,
             ConfigureParameterBinding = pi =>
