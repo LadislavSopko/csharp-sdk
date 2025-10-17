@@ -2,7 +2,7 @@
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <System9Version>9.0.10</System9Version>
-    <System10Version>10.0.0-rc.2.25502.107</System10Version>
+    <System10Version>10.0.0-preview.3.25171.5</System10Version>
     <MicrosoftExtensionsAIVersion>9.10.0</MicrosoftExtensionsAIVersion>
   </PropertyGroup>
 
