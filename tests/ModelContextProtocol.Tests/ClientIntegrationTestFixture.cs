@@ -25,14 +25,14 @@ public class ClientIntegrationTestFixture
 
         TestServerTransportOptions = new()
         {
-            Command = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "TestServer.exe" : "dotnet",
+            Command = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "TestServer.exe" : PlatformDetection.IsMonoRuntime ? "mono" : "dotnet",
             Name = "TestServer",
         };
 
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
             // Change to Arguments to "mcp-server-everything" if you want to run the server locally after creating a symlink
-            TestServerTransportOptions.Arguments = ["TestServer.dll"];
+            TestServerTransportOptions.Arguments = [PlatformDetection.IsMonoRuntime ? "TestServer.exe" : "TestServer.dll"];
         }
     }
 
@@ -41,8 +41,8 @@ public class ClientIntegrationTestFixture
         _loggerFactory = loggerFactory;
     }
 
-    public Task<IMcpClient> CreateClientAsync(string clientId, McpClientOptions? clientOptions = null) =>
-        McpClientFactory.CreateAsync(new StdioClientTransport(clientId switch
+    public Task<McpClient> CreateClientAsync(string clientId, McpClientOptions? clientOptions = null) =>
+        McpClient.CreateAsync(new StdioClientTransport(clientId switch
         {
             "everything" => EverythingServerTransportOptions,
             "test_server" => TestServerTransportOptions,

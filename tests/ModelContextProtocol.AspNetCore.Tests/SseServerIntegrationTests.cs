@@ -8,9 +8,9 @@ public class SseServerIntegrationTests(SseServerIntegrationTestFixture fixture, 
     : HttpServerIntegrationTests(fixture, testOutputHelper)
 
 {
-    protected override SseClientTransportOptions ClientTransportOptions => new()
+    protected override HttpClientTransportOptions ClientTransportOptions => new()
     {
-        Endpoint = new Uri("http://localhost/sse"),
+        Endpoint = new("http://localhost:5000/sse"),
         Name = "In-memory SSE Client",
     };
 

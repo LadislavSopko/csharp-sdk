@@ -21,9 +21,9 @@ public abstract class HttpServerIntegrationTests : LoggedTest, IClassFixture<Sse
         base.Dispose();
     }
 
-    protected abstract SseClientTransportOptions ClientTransportOptions { get; }
+    protected abstract HttpClientTransportOptions ClientTransportOptions { get; }
 
-    private Task<IMcpClient> GetClientAsync(McpClientOptions? options = null)
+    private Task<McpClient> GetClientAsync(McpClientOptions? options = null)
     {
         return _fixture.ConnectMcpClientAsync(options, LoggerFactory);
     }
@@ -52,11 +52,23 @@ public abstract class HttpServerIntegrationTests : LoggedTest, IClassFixture<Sse
         // Assert
         Assert.NotNull(client.ServerCapabilities);
         Assert.NotNull(client.ServerInfo);
+        Assert.NotNull(client.NegotiatedProtocolVersion);
+
+        if (ClientTransportOptions.Endpoint.AbsolutePath.EndsWith("/sse") ||
+            ClientTransportOptions.Endpoint.AbsolutePath.EndsWith("/stateless"))
+        {
+            // In SSE and in Streamable HTTP's stateless mode, no protocol-defined session IDs are used.:w
+            Assert.Null(client.SessionId);
+        }
+        else
+        {
+            Assert.NotNull(client.SessionId);
+        }
     }
 
     [Fact]
     public async Task ListTools_Sse_TestServer()
-    {        
+    {
         // arrange
 
         // act
@@ -85,9 +97,38 @@ public abstract class HttpServerIntegrationTests : LoggedTest, IClassFixture<Sse
 
         // assert
         Assert.NotNull(result);
-        Assert.False(result.IsError);
-        var textContent = Assert.Single(result.Content, c => c.Type == "text");
+        Assert.Null(result.IsError);
+        var textContent = Assert.Single(result.Content.OfType<TextContentBlock>());
         Assert.Equal("Echo: Hello MCP!", textContent.Text);
+    }
+
+    [Fact]
+    public async Task CallTool_EchoSessionId_ReturnsTheSameSessionId()
+    {
+        // arrange
+
+        // act
+        await using var client = await GetClientAsync();
+        var result1 = await client.CallToolAsync("echoSessionId", cancellationToken: TestContext.Current.CancellationToken);
+        var result2 = await client.CallToolAsync("echoSessionId", cancellationToken: TestContext.Current.CancellationToken);
+        var result3 = await client.CallToolAsync("echoSessionId", cancellationToken: TestContext.Current.CancellationToken);
+
+        // assert
+        Assert.NotNull(result1);
+        Assert.NotNull(result2);
+        Assert.NotNull(result3);
+
+        Assert.Null(result1.IsError);
+        Assert.Null(result2.IsError);
+        Assert.Null(result3.IsError);
+
+        var textContent1 = Assert.Single(result1.Content.OfType<TextContentBlock>());
+        var textContent2 = Assert.Single(result2.Content.OfType<TextContentBlock>());
+        var textContent3 = Assert.Single(result3.Content.OfType<TextContentBlock>());
+
+        Assert.NotNull(textContent1.Text);
+        Assert.Equal(textContent1.Text, textContent2.Text);
+        Assert.Equal(textContent1.Text, textContent3.Text);
     }
 
     [Fact]
@@ -199,7 +240,7 @@ public abstract class HttpServerIntegrationTests : LoggedTest, IClassFixture<Sse
 
         // act
         await using var client = await GetClientAsync();
-        await Assert.ThrowsAsync<McpException>(async () => await client.GetPromptAsync("non_existent_prompt", null, cancellationToken: TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<McpProtocolException>(async () => await client.GetPromptAsync("non_existent_prompt", null, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -212,20 +253,14 @@ public abstract class HttpServerIntegrationTests : LoggedTest, IClassFixture<Sse
         int samplingHandlerCalls = 0;
 #pragma warning disable CS1998 // Async method lacks 'await' operators and will run synchronously
         McpClientOptions options = new();
-        options.Capabilities = new();
-        options.Capabilities.Sampling ??= new();
-        options.Capabilities.Sampling.SamplingHandler = async (_, _, _) =>
+        options.Handlers.SamplingHandler = async (_, _, _) =>
         {
             samplingHandlerCalls++;
             return new CreateMessageResult
             {
                 Model = "test-model",
                 Role = Role.Assistant,
-                Content = new Content
-                {
-                    Type = "text",
-                    Text = "Test response"
-                }
+                Content = new TextContentBlock { Text = "Test response" },
             };
         };
         await using var client = await GetClientAsync(options);
@@ -233,16 +268,15 @@ public abstract class HttpServerIntegrationTests : LoggedTest, IClassFixture<Sse
 
         // Call the server's sampleLLM tool which should trigger our sampling handler
         var result = await client.CallToolAsync("sampleLLM", new Dictionary<string, object?>
-            {
-                ["prompt"] = "Test prompt",
-                ["maxTokens"] = 100
-            },
+        {
+            ["prompt"] = "Test prompt",
+            ["maxTokens"] = 100
+        },
             cancellationToken: TestContext.Current.CancellationToken);
 
         // assert
         Assert.NotNull(result);
-        var textContent = Assert.Single(result.Content);
-        Assert.Equal("text", textContent.Type);
+        var textContent = Assert.Single(result.Content.OfType<TextContentBlock>());
         Assert.False(string.IsNullOrEmpty(textContent.Text));
     }
 
@@ -255,7 +289,7 @@ public abstract class HttpServerIntegrationTests : LoggedTest, IClassFixture<Sse
         for (int i = 0; i < 4; i++)
         {
             var client = (i % 2 == 0) ? client1 : client2;
-            var result =  await client.CallToolAsync(
+            var result = await client.CallToolAsync(
                 "echo",
                 new Dictionary<string, object?>
                 {
@@ -265,8 +299,8 @@ public abstract class HttpServerIntegrationTests : LoggedTest, IClassFixture<Sse
             );
 
             Assert.NotNull(result);
-            Assert.False(result.IsError);
-            var textContent = Assert.Single(result.Content, c => c.Type == "text");
+            Assert.Null(result.IsError);
+            var textContent = Assert.Single(result.Content.OfType<TextContentBlock>());
             Assert.Equal($"Echo: Hello MCP! {i}", textContent.Text);
         }
     }

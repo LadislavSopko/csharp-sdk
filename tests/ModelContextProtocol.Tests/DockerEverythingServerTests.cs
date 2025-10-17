@@ -36,15 +36,15 @@ public class DockerEverythingServerTests(ITestOutputHelper testOutputHelper) : L
             ClientInfo = new() { Name = "IntegrationTestClient", Version = "1.0.0" }
         };
 
-        var defaultConfig = new SseClientTransportOptions
+        var defaultConfig = new HttpClientTransportOptions
         {
             Endpoint = new Uri($"http://localhost:{port}/sse"),
             Name = "Everything",
         };
 
         // Create client and run tests
-        await using var client = await McpClientFactory.CreateAsync(
-            new SseClientTransport(defaultConfig),
+        await using var client = await McpClient.CreateAsync(
+            new HttpClientTransport(defaultConfig),
             defaultOptions, 
             loggerFactory: LoggerFactory,
             cancellationToken: TestContext.Current.CancellationToken);
@@ -63,39 +63,32 @@ public class DockerEverythingServerTests(ITestOutputHelper testOutputHelper) : L
         await using var fixture = new EverythingSseServerFixture(port);
         await fixture.StartAsync();
 
-        var defaultConfig = new SseClientTransportOptions
+        var defaultConfig = new HttpClientTransportOptions
         {
             Endpoint = new Uri($"http://localhost:{port}/sse"),
             Name = "Everything",
         };
 
         int samplingHandlerCalls = 0;
-        var defaultOptions = new McpClientOptions
+        var defaultOptions = new McpClientOptions()
         {
-            Capabilities = new()
+            Handlers = new()
             {
-                Sampling = new()
+                SamplingHandler = async (_, _, _) =>
                 {
-                    SamplingHandler = async (_, _, _) =>
+                    samplingHandlerCalls++;
+                    return new CreateMessageResult
                     {
-                        samplingHandlerCalls++;
-                        return new CreateMessageResult
-                        {
-                            Model = "test-model",
-                            Role = Role.Assistant,
-                            Content = new Content
-                            {
-                                Type = "text",
-                                Text = "Test response"
-                            }
-                        };
-                    },
-                },
-            },
+                        Model = "test-model",
+                        Role = Role.Assistant,
+                        Content = new TextContentBlock { Text = "Test response" },
+                    };
+                }
+            }
         };
 
-        await using var client = await McpClientFactory.CreateAsync(
-            new SseClientTransport(defaultConfig),
+        await using var client = await McpClient.CreateAsync(
+            new HttpClientTransport(defaultConfig),
             defaultOptions,
             loggerFactory: LoggerFactory,
             cancellationToken: TestContext.Current.CancellationToken);
@@ -109,7 +102,7 @@ public class DockerEverythingServerTests(ITestOutputHelper testOutputHelper) : L
 
         // assert
         Assert.NotNull(result);
-        var textContent = Assert.Single(result.Content);
+        var textContent = Assert.Single(result.Content.OfType<TextContentBlock>());
         Assert.Equal("text", textContent.Type);
         Assert.False(string.IsNullOrEmpty(textContent.Text));
     }

@@ -15,15 +15,15 @@ namespace ModelContextProtocol.AspNetCore.Tests;
 
 public partial class SseIntegrationTests(ITestOutputHelper outputHelper) : KestrelInMemoryTest(outputHelper)
 {
-    private readonly SseClientTransportOptions DefaultTransportOptions = new()
+    private readonly HttpClientTransportOptions DefaultTransportOptions = new()
     {
-        Endpoint = new Uri("http://localhost/sse"),
+        Endpoint = new("http://localhost:5000/sse"),
         Name = "In-memory SSE Client",
     };
 
-    private Task<IMcpClient> ConnectMcpClientAsync(HttpClient? httpClient = null, SseClientTransportOptions? transportOptions = null)
-        => McpClientFactory.CreateAsync(
-            new SseClientTransport(transportOptions ?? DefaultTransportOptions, httpClient ?? HttpClient, LoggerFactory),
+    private Task<McpClient> ConnectMcpClientAsync(HttpClient? httpClient = null, HttpClientTransportOptions? transportOptions = null)
+        => McpClient.CreateAsync(
+            new HttpClientTransport(transportOptions ?? DefaultTransportOptions, httpClient ?? HttpClient, LoggerFactory),
             loggerFactory: LoggerFactory,
             cancellationToken: TestContext.Current.CancellationToken);
 
@@ -48,6 +48,22 @@ public partial class SseIntegrationTests(ITestOutputHelper outputHelper) : Kestr
     {
         await using var app = Builder.Build();
         MapAbsoluteEndpointUriMcp(app);
+        await app.StartAsync(TestContext.Current.CancellationToken);
+
+        await using var mcpClient = await ConnectMcpClientAsync();
+
+        // Send a test message through POST endpoint
+        await mcpClient.SendNotificationAsync("test/message", new Envelope { Message = "Hello, SSE!" }, serializerOptions: JsonContext.Default.Options, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(true);
+    }
+
+    [Fact]
+    public async Task ConnectAndReceiveMessage_ServerReturningJsonInPostRequest()
+    {
+        await using var app = Builder.Build();
+        MapAbsoluteEndpointUriMcp(app, respondInJson: true);
+
         await app.StartAsync(TestContext.Current.CancellationToken);
 
         await using var mcpClient = await ConnectMcpClientAsync();
@@ -133,17 +149,17 @@ public partial class SseIntegrationTests(ITestOutputHelper outputHelper) : Kestr
         var tools = await mcpClient.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(2, tools.Count);
-        Assert.Contains(tools, tools => tools.Name == "Echo");
+        Assert.Contains(tools, tools => tools.Name == "echo");
         Assert.Contains(tools, tools => tools.Name == "sampleLLM");
 
         var echoResponse = await mcpClient.CallToolAsync(
-            "Echo",
+            "echo",
             new Dictionary<string, object?>
             {
                 ["message"] = "from client!"
             },
             cancellationToken: TestContext.Current.CancellationToken);
-        var textContent = Assert.Single(echoResponse.Content, c => c.Type == "text");
+        var textContent = Assert.Single(echoResponse.Content.OfType<TextContentBlock>());
 
         Assert.Equal("hello from client!", textContent.Text);
     }
@@ -179,11 +195,11 @@ public partial class SseIntegrationTests(ITestOutputHelper outputHelper) : Kestr
         app.MapMcp();
         await app.StartAsync(TestContext.Current.CancellationToken);
 
-        var sseOptions = new SseClientTransportOptions()
+        var sseOptions = new HttpClientTransportOptions
         {
-            Endpoint = new Uri("http://localhost/sse"),
+            Endpoint = new("http://localhost:5000/sse"),
             Name = "In-memory SSE Client",
-            AdditionalHeaders = new()
+            AdditionalHeaders = new Dictionary<string, string>
             {
                 ["Authorize"] = "Bearer testToken"
             },
@@ -206,11 +222,11 @@ public partial class SseIntegrationTests(ITestOutputHelper outputHelper) : Kestr
         app.MapMcp();
         await app.StartAsync(TestContext.Current.CancellationToken);
 
-        var sseOptions = new SseClientTransportOptions()
+        var sseOptions = new HttpClientTransportOptions
         {
-            Endpoint = new Uri("http://localhost/sse"),
+            Endpoint = new("http://localhost:5000/sse"),
             Name = "In-memory SSE Client",
-            AdditionalHeaders = new()
+            AdditionalHeaders = new Dictionary<string, string>()
             {
                 [""] = ""
             },
@@ -220,7 +236,7 @@ public partial class SseIntegrationTests(ITestOutputHelper outputHelper) : Kestr
         Assert.Equal("Failed to add header '' with value '' from AdditionalHeaders.", ex.Message);
     }
 
-    private static void MapAbsoluteEndpointUriMcp(IEndpointRouteBuilder endpoints)
+    private static void MapAbsoluteEndpointUriMcp(IEndpointRouteBuilder endpoints, bool respondInJson = false)
     {
         var loggerFactory = endpoints.ServiceProvider.GetRequiredService<ILoggerFactory>();
         var optionsSnapshot = endpoints.ServiceProvider.GetRequiredService<IOptions<McpServerOptions>>();
@@ -235,13 +251,13 @@ public partial class SseIntegrationTests(ITestOutputHelper outputHelper) : Kestr
 
             response.Headers.ContentType = "text/event-stream";
 
-            await using var transport = new SseResponseStreamTransport(response.Body, "http://localhost/message");
+            await using var transport = new SseResponseStreamTransport(response.Body, "http://localhost:5000/message");
             session = transport;
 
             try
             {
                 var transportTask = transport.RunAsync(cancellationToken: requestAborted);
-                await using var server = McpServerFactory.Create(transport, optionsSnapshot.Value, loggerFactory, endpoints.ServiceProvider);
+                await using var server = McpServer.Create(transport, optionsSnapshot.Value, loggerFactory, endpoints.ServiceProvider);
 
                 try
                 {
@@ -267,7 +283,7 @@ public partial class SseIntegrationTests(ITestOutputHelper outputHelper) : Kestr
                 await Results.BadRequest("Session not started.").ExecuteAsync(context);
                 return;
             }
-            var message = (JsonRpcMessage?)await context.Request.ReadFromJsonAsync(McpJsonUtilities.DefaultOptions.GetTypeInfo(typeof(JsonRpcMessage)), context.RequestAborted);
+            var message = await context.Request.ReadFromJsonAsync<JsonRpcMessage>(McpJsonUtilities.DefaultOptions, context.RequestAborted);
             if (message is null)
             {
                 await Results.BadRequest("No message in request body.").ExecuteAsync(context);
@@ -276,7 +292,15 @@ public partial class SseIntegrationTests(ITestOutputHelper outputHelper) : Kestr
 
             await session.OnMessageReceivedAsync(message, context.RequestAborted);
             context.Response.StatusCode = StatusCodes.Status202Accepted;
-            await context.Response.WriteAsync("Accepted");
+
+            if (respondInJson)
+            {
+                await context.Response.WriteAsJsonAsync(message, McpJsonUtilities.DefaultOptions, cancellationToken: context.RequestAborted);
+            }
+            else
+            {
+                await context.Response.WriteAsync("Accepted");
+            }
         });
     }
 

@@ -5,10 +5,10 @@ namespace ModelContextProtocol.AspNetCore.Tests;
 public class StatelessServerIntegrationTests(SseServerIntegrationTestFixture fixture, ITestOutputHelper testOutputHelper)
     : StreamableHttpServerIntegrationTests(fixture, testOutputHelper)
 {
-    protected override SseClientTransportOptions ClientTransportOptions => new()
+    protected override HttpClientTransportOptions ClientTransportOptions => new()
     {
-        Endpoint = new Uri("http://localhost/stateless"),
+        Endpoint = new("http://localhost:5000/stateless"),
         Name = "In-memory Streamable HTTP Client",
-        UseStreamableHttp = true,
+        TransportMode = HttpTransportMode.StreamableHttp,
     };
 }

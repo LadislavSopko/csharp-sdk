@@ -13,14 +13,14 @@ public class MapMcpSseTests(ITestOutputHelper outputHelper) : MapMcpTests(output
     [InlineData("/mcp/secondary")]
     public async Task Allows_Customizing_Route(string pattern)
     {
-        Builder.Services.AddMcpServer().WithHttpTransport(ConfigureStateless);
+        Builder.Services.AddMcpServer().WithHttpTransport();
         await using var app = Builder.Build();
 
         app.MapMcp(pattern);
 
         await app.StartAsync(TestContext.Current.CancellationToken);
 
-        using var response = await HttpClient.GetAsync($"http://localhost{pattern}/sse", HttpCompletionOption.ResponseHeadersRead, TestContext.Current.CancellationToken);
+        using var response = await HttpClient.GetAsync($"http://localhost:5000{pattern}/sse", HttpCompletionOption.ResponseHeadersRead, TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
         using var sseStream = await response.Content.ReadAsStreamAsync(TestContext.Current.CancellationToken);
         using var sseStreamReader = new StreamReader(sseStream, System.Text.Encoding.UTF8);
@@ -52,7 +52,7 @@ public class MapMcpSseTests(ITestOutputHelper outputHelper) : MapMcpTests(output
 
         await app.StartAsync(TestContext.Current.CancellationToken);
 
-        var mcpClient = await ConnectAsync(requestPath);
+        await using var mcpClient = await ConnectAsync(requestPath);
 
         Assert.Equal("TestCustomRouteServer", mcpClient.ServerInfo.Name);
     }

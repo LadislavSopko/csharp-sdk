@@ -1,5 +1,4 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
@@ -54,7 +53,7 @@ public class CancellationTests : ClientServerTestBase
         await using var client = await CreateMcpClientForServer();
 
         var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
-        var waitTool = tools.First(t => t.Name == nameof(WaitForCancellation));
+        var waitTool = tools.First(t => t.Name == "wait_for_cancellation");
 
         CancellationTokenSource cts = new();
         var waitTask = waitTool.InvokeAsync(cancellationToken: cts.Token);

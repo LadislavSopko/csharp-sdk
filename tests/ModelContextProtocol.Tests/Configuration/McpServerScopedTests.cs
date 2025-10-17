@@ -16,16 +16,16 @@ public partial class McpServerScopedTests : ClientServerTestBase
     protected override void ConfigureServices(ServiceCollection services, IMcpServerBuilder mcpServerBuilder)
     {
         mcpServerBuilder.WithTools<EchoTool>(serializerOptions: McpServerScopedTestsJsonContext.Default.Options);
-        services.AddScoped(_ => new ComplexObject() { Name = "Scoped" });
+        services.AddScoped(_ => new ComplexObject { Name = "Scoped" });
     }
 
     [Fact]
     public async Task InjectScopedServiceAsArgument()
     {
-        await using IMcpClient client = await CreateMcpClientForServer();
+        await using McpClient client = await CreateMcpClientForServer();
 
         var tools = await client.ListToolsAsync(McpServerScopedTestsJsonContext.Default.Options, TestContext.Current.CancellationToken);
-        var tool = tools.First(t => t.Name == nameof(EchoTool.EchoComplex));
+        var tool = tools.First(t => t.Name == "echo_complex");
         Assert.DoesNotContain("\"complex\"", JsonSerializer.Serialize(tool.JsonSchema, McpJsonUtilities.DefaultOptions));
 
         int startingConstructed = ComplexObject.Constructed;

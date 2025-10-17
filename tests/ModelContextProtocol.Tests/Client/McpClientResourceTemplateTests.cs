@@ -15,9 +15,9 @@ public partial class McpClientResourceTemplateTests : ClientServerTestBase
     protected override void ConfigureServices(ServiceCollection services, IMcpServerBuilder mcpServerBuilder)
     {
         mcpServerBuilder.WithReadResourceHandler((request, cancellationToken) =>
-            new ValueTask<ReadResourceResult>(new ReadResourceResult()
+            new ValueTask<ReadResourceResult>(new ReadResourceResult
             {
-                Contents = [new TextResourceContents() { Text = request.Params?.Uri ?? string.Empty }]
+                Contents = [new TextResourceContents { Text = request.Params?.Uri ?? string.Empty }]
             }));
     }
 
@@ -73,7 +73,7 @@ public partial class McpClientResourceTemplateTests : ClientServerTestBase
     public async Task UriTemplate_InputsProduceExpectedOutputs(
         IReadOnlyDictionary<string, object?> variables, string uriTemplate, object expected)
     {
-        await using IMcpClient client = await CreateMcpClientForServer();
+        await using McpClient client = await CreateMcpClientForServer();
 
         var result = await client.ReadResourceAsync(uriTemplate, variables, TestContext.Current.CancellationToken);
         Assert.NotNull(result);
@@ -95,10 +95,10 @@ public partial class McpClientResourceTemplateTests : ClientServerTestBase
         public int Level { get; set; } = 4;
 
         [JsonPropertyName("variables")]
-        public Dictionary<string, JsonElement> Variables { get; set; } = [];
+        public IDictionary<string, JsonElement> Variables { get; set; } = new Dictionary<string, JsonElement>();
 
         [JsonPropertyName("testcases")]
-        public List<List<JsonElement>> TestCases { get; set; } = [];
+        public IList<List<JsonElement>> TestCases { get; set; } = [];
     }
 
     [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower)]

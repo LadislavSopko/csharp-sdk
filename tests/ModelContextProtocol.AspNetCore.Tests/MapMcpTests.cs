@@ -1,10 +1,14 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using ModelContextProtocol.AspNetCore.Tests.Utils;
 using ModelContextProtocol.Client;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using ModelContextProtocol.Tests.Utils;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Net;
 using System.Security.Claims;
 
@@ -20,17 +24,21 @@ public abstract class MapMcpTests(ITestOutputHelper testOutputHelper) : KestrelI
         options.Stateless = Stateless;
     }
 
-    protected async Task<IMcpClient> ConnectAsync(string? path = null)
+    protected async Task<McpClient> ConnectAsync(
+        string? path = null,
+        HttpClientTransportOptions? transportOptions = null,
+        McpClientOptions? clientOptions = null)
     {
+        // Default behavior when no options are provided
         path ??= UseStreamableHttp ? "/" : "/sse";
 
-        var sseClientTransportOptions = new SseClientTransportOptions()
+        await using var transport = new HttpClientTransport(transportOptions ?? new HttpClientTransportOptions
         {
-            Endpoint = new Uri($"http://localhost{path}"),
-            UseStreamableHttp = UseStreamableHttp,
-        };
-        await using var transport = new SseClientTransport(sseClientTransportOptions, HttpClient, LoggerFactory);
-        return await McpClientFactory.CreateAsync(transport, loggerFactory: LoggerFactory, cancellationToken: TestContext.Current.CancellationToken);
+            Endpoint = new Uri($"http://localhost:5000{path}"),
+            TransportMode = UseStreamableHttp ? HttpTransportMode.StreamableHttp : HttpTransportMode.Sse,
+        }, HttpClient, LoggerFactory);
+
+        return await McpClient.CreateAsync(transport, clientOptions, LoggerFactory, TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -45,12 +53,6 @@ public abstract class MapMcpTests(ITestOutputHelper testOutputHelper) : KestrelI
     [Fact]
     public async Task Can_UseIHttpContextAccessor_InTool()
     {
-        Assert.SkipWhen(UseStreamableHttp && !Stateless,
-            """
-            IHttpContextAccessor is not currently supported with non-stateless Streamable HTTP.
-            TODO: Support it in stateless mode by manually capturing and flowing execution context.
-            """);
-
         Builder.Services.AddMcpServer().WithHttpTransport(ConfigureStateless).WithTools<EchoHttpContextUserTools>();
 
         Builder.Services.AddHttpContextAccessor();
@@ -70,20 +72,22 @@ public abstract class MapMcpTests(ITestOutputHelper testOutputHelper) : KestrelI
 
         await app.StartAsync(TestContext.Current.CancellationToken);
 
-        var mcpClient = await ConnectAsync();
+        await using var mcpClient = await ConnectAsync();
 
         var response = await mcpClient.CallToolAsync(
-            "EchoWithUserName",
+            "echo_with_user_name",
             new Dictionary<string, object?>() { ["message"] = "Hello world!" },
             cancellationToken: TestContext.Current.CancellationToken);
 
-        var content = Assert.Single(response.Content);
+        var content = Assert.Single(response.Content.OfType<TextContentBlock>());
         Assert.Equal("TestUser: Hello world!", content.Text);
     }
 
     [Fact]
     public async Task Messages_FromNewUser_AreRejected()
     {
+        Assert.SkipWhen(Stateless, "User validation across requests is not applicable in stateless mode.");
+
         Builder.Services.AddMcpServer().WithHttpTransport(ConfigureStateless).WithTools<EchoHttpContextUserTools>();
 
         // Add an authentication scheme that will send a 403 Forbidden response.
@@ -110,8 +114,134 @@ public abstract class MapMcpTests(ITestOutputHelper testOutputHelper) : KestrelI
         Assert.Equal(HttpStatusCode.Forbidden, httpRequestException.StatusCode);
     }
 
-    protected ClaimsPrincipal CreateUser(string name)
-        => new ClaimsPrincipal(new ClaimsIdentity(
+    [Fact]
+    public async Task ClaimsPrincipal_CanBeInjected_IntoToolMethod()
+    {
+        Builder.Services.AddMcpServer().WithHttpTransport(ConfigureStateless).WithTools<ClaimsPrincipalTools>();
+
+        await using var app = Builder.Build();
+
+        app.Use(next => async context =>
+        {
+            context.User = CreateUser("TestUser");
+            await next(context);
+        });
+
+        app.MapMcp();
+
+        await app.StartAsync(TestContext.Current.CancellationToken);
+
+        await using var client = await ConnectAsync();
+
+        var response = await client.CallToolAsync(
+            "echo_claims_principal",
+            new Dictionary<string, object?>() { ["message"] = "Hello world!" },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var content = Assert.Single(response.Content.OfType<TextContentBlock>());
+        Assert.Equal("TestUser: Hello world!", content.Text);
+    }
+
+    [Fact]
+    public async Task Sampling_DoesNotCloseStream_Prematurely()
+    {
+        Assert.SkipWhen(Stateless, "Sampling is not supported in stateless mode.");
+
+        Builder.Services.AddMcpServer().WithHttpTransport(ConfigureStateless).WithTools<SamplingRegressionTools>();
+
+        var mockLoggerProvider = new MockLoggerProvider();
+        Builder.Logging.AddProvider(mockLoggerProvider);
+        Builder.Logging.SetMinimumLevel(LogLevel.Debug);
+
+        await using var app = Builder.Build();
+
+        // Reset the LoggerFactory used by the client to use the MockLoggerProvider as well.
+        LoggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
+
+        app.MapMcp();
+
+        await app.StartAsync(TestContext.Current.CancellationToken);
+
+        var sampleCount = 0;
+        var clientOptions = new McpClientOptions()
+        {
+            Handlers = new()
+            {
+                SamplingHandler = async (parameters, _, _) =>
+                {
+                    Assert.NotNull(parameters?.Messages);
+                    var message = Assert.Single(parameters.Messages);
+                    Assert.Equal(Role.User, message.Role);
+                    Assert.Equal("Test prompt for sampling", Assert.IsType<TextContentBlock>(message.Content).Text);
+
+                    sampleCount++;
+                    return new CreateMessageResult
+                    {
+                        Model = "test-model",
+                        Role = Role.Assistant,
+                        Content = new TextContentBlock { Text = "Sampling response from client" },
+                    };
+                }
+            }
+        };
+
+        await using var mcpClient = await ConnectAsync(clientOptions: clientOptions);
+
+        var result = await mcpClient.CallToolAsync("sampling-tool", new Dictionary<string, object?>
+        {
+            ["prompt"] = "Test prompt for sampling"
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Null(result.IsError);
+        var textContent = Assert.Single(result.Content);
+        Assert.Equal("text", textContent.Type);
+        Assert.Equal("Sampling completed successfully. Client responded: Sampling response from client", Assert.IsType<TextContentBlock>(textContent).Text);
+
+        Assert.Equal(2, sampleCount);
+
+        // Verify that the tool call and the sampling request both used the same ID to ensure we cover against regressions.
+        // https://github.com/modelcontextprotocol/csharp-sdk/issues/464
+        Assert.Single(mockLoggerProvider.LogMessages, m =>
+            m.Category == "ModelContextProtocol.Client.McpClient" &&
+            m.Message.Contains("request '2' for method 'tools/call'"));
+
+        Assert.Single(mockLoggerProvider.LogMessages, m =>
+            m.Category == "ModelContextProtocol.Server.McpServer" &&
+            m.Message.Contains("request '2' for method 'sampling/createMessage'"));
+    }
+
+    [Fact]
+    public async Task Server_ShutsDownQuickly_WhenClientIsConnected()
+    {
+        Builder.Services.AddMcpServer().WithHttpTransport().WithTools<ClaimsPrincipalTools>();
+
+        await using var app = Builder.Build();
+        app.MapMcp();
+
+        await app.StartAsync(TestContext.Current.CancellationToken);
+
+        // Connect a client which will open a long-running GET request (SSE or Streamable HTTP)
+        await using var mcpClient = await ConnectAsync();
+
+        // Verify the client is connected
+        var tools = await mcpClient.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotEmpty(tools);
+
+        // Now measure how long it takes to stop the server
+        var stopwatch = Stopwatch.StartNew();
+        await app.StopAsync(TestContext.Current.CancellationToken);
+        stopwatch.Stop();
+
+        // The server should shut down quickly (within a few seconds). We use 5 seconds as a generous threshold.
+        // This is much less than the default HostOptions.ShutdownTimeout of 30 seconds.
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5),
+            $"Server took {stopwatch.Elapsed.TotalSeconds:F2} seconds to shut down with a connected client. " +
+            "This suggests the GET request is not respecting ApplicationStopping token.");
+    }
+
+    private ClaimsPrincipal CreateUser(string name)
+        => new(new ClaimsIdentity(
             [new Claim("name", name), new Claim(ClaimTypes.NameIdentifier, name)],
             "TestAuthType", "name", "role"));
 
@@ -124,6 +254,46 @@ public abstract class MapMcpTests(ITestOutputHelper testOutputHelper) : KestrelI
             var httpContext = contextAccessor.HttpContext ?? throw new Exception("HttpContext unavailable!");
             var userName = httpContext.User.Identity?.Name ?? "anonymous";
             return $"{userName}: {message}";
+        }
+    }
+
+    [McpServerToolType]
+    protected class ClaimsPrincipalTools
+    {
+        [McpServerTool, Description("Echoes the input back to the client with the user name from ClaimsPrincipal.")]
+        public string EchoClaimsPrincipal(ClaimsPrincipal? user, string message)
+        {
+            var userName = user?.Identity?.Name ?? "anonymous";
+            return $"{userName}: {message}";
+        }
+    }
+
+    [McpServerToolType]
+    private class SamplingRegressionTools
+    {
+        [McpServerTool(Name = "sampling-tool")]
+        public static async Task<string> SamplingToolAsync(McpServer server, string prompt, CancellationToken cancellationToken)
+        {
+            // This tool reproduces the scenario described in https://github.com/modelcontextprotocol/csharp-sdk/issues/464
+            // 1. The client calls tool with request ID 2, because it's the first request after the initialize request.
+            // 2. This tool makes two sampling requests which use IDs 1 and 2.
+            // 3. In the old buggy Streamable HTTP transport code, this would close the SSE response stream,
+            //    because the second sampling request used an ID matching the tool call.
+            var samplingRequest = new CreateMessageRequestParams
+            {
+                Messages = [
+                    new SamplingMessage
+                    {
+                        Role = Role.User,
+                        Content = new TextContentBlock { Text = prompt },
+                    }
+                ],
+            };
+
+            await server.SampleAsync(samplingRequest, cancellationToken);
+            var samplingResult = await server.SampleAsync(samplingRequest, cancellationToken);
+
+            return $"Sampling completed successfully. Client responded: {Assert.IsType<TextContentBlock>(samplingResult.Content).Text}";
         }
     }
 }
