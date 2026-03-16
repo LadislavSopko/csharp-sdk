@@ -7,7 +7,7 @@
 
   <!-- Product dependencies netstandard -->
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
-    <PackageVersion Include="Microsoft.Bcl.Memory" Version="9.0.4" />
+    <PackageVersion Include="Microsoft.Bcl.Memory" Version="9.0.14" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
     <PackageVersion Include="System.IO.Pipelines" Version="8.0.0" />
